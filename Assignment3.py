@@ -11,6 +11,16 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import make_pipeline
 
+
+import seaborn as sns
+from sklearn.feature_selection import mutual_info_classif
+from sklearn.preprocessing import StandardScaler
+
+from sklearn.feature_selection import RFE
+from sklearn.linear_model import LogisticRegression
+
+
+
 #%%
 # read the data file into dataframes and merge into one single dataframe for easier analysis
 os.chdir("C:\\Users\\vikto\\Desktop\\Skola'\\Andra Kurser\\D7015B - Industrial AI and eMaintenence\\Assignment 3")
@@ -65,7 +75,7 @@ disp.plot() #Plot the confusion matrix
 plt.title("Confusion Matrix for 80-20 train split (0 = Normal Event, 1 = Abnormal Event)")
 plt.show()
 #%% 5-fold cross-validation
-
+    
 #5-fold cross-validation splits training data into 5 subsets, trains on 4 of these and test on remaining subsets, and repeats for each subset. This model is then used on test set to evaluate performance.
 pipeline = make_pipeline(StandardScaler(), SVC(kernel='rbf', probability=True, random_state=42)) #Create a pipeline that includes standard scaling and new SVM model to train on. 
 cv_scores = cross_val_score(pipeline, X_train, y_train, cv=5)
@@ -74,7 +84,7 @@ print("Mean CV score:", np.mean(cv_scores))
 
 #Hyperparameter grid for RBF SVM
 param_grid = { #Parameters to search over for tuning the SVM model. Total 5x5 = 25 combinations to evaluate over cv = 5 folds --> 25*5 = 125 total model fits to evaluate and compare.
-    'svc__C': [0.1, 0.05,1, 10, 50], #C regulates trade-off between training error and testing error. High C prioritize minimizing training errors (sensitive to outliers). Low C allows more training errors but can improve generalization.
+    'svc__C': [0.1, 0.05, 1, 10, 50], #C regulates trade-off between training error and testing error. High C prioritize minimizing training errors (sensitive to outliers). Low C allows more training errors but can improve generalization.
     'svc__gamma': [0.01, 0.0625, 0.1, 0.5, 1] #Gamma describes how local training points influence other data points. High gamma means data points only affect nearby points, lower gamma means data points have further reach and thus higher weight on more distant points.
 }
 
@@ -97,3 +107,79 @@ disp_cv = ConfusionMatrixDisplay(confusion_matrix=cm_cv, display_labels=best_mod
 disp_cv.plot()
 plt.title("Confusion Matrix for CV-trained SVM (0 = Normal, 1 = Abnormal)")
 plt.show()
+
+##FOR GRADE 5
+
+#Separate features and target
+X = merged_data.drop(columns=['event'])
+y = merged_data['event']
+
+#%%
+#Full Pearson correlation matrix
+corr_matrix = merged_data.corr()
+
+plt.figure(figsize=(12,10))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm')
+plt.title("Full Pearson Correlation Matrix")
+plt.show()
+
+#%%
+#Mutual Information scores for all features
+mi_scores = mutual_info_classif(X, y, random_state=42)
+mi_df = pd.DataFrame({'feature': X.columns, 'MI_score': mi_scores}).sort_values(by='MI_score', ascending=False)
+
+plt.figure(figsize=(10,6))
+sns.barplot(x='MI_score', y='feature', data=mi_df)
+plt.title("Full Mutual Information Scores")
+plt.show()
+
+#%%
+#Recursive Feature Elimination (RFE):
+
+svc_estimator = SVC(kernel='linear', random_state=42)  #Using a linear kernel for RFE to get feature importance based on weights. Using a linear kernel might miss non-linear relationships.
+rfe = RFE(estimator=svc_estimator, n_features_to_select=6) #Select top 6 features based on RFE
+pipeline_rfe = make_pipeline(StandardScaler(), rfe, svc_estimator)
+pipeline_rfe.fit(X, y)
+selected_features_rfe = X.columns[rfe.support_].tolist()
+print("RFE selected features:", selected_features_rfe)
+
+#%%
+
+pipeline_logregL1 = make_pipeline(
+    StandardScaler(),
+    LogisticRegression(penalty='l1', solver='liblinear', C = 1.0,random_state=42) #C = 1/alpha, where alpha is penalty strength (regularization parameter). Read more about this in research section of report.
+)
+pipeline_logregL1.fit(X, y)
+
+coef = pipeline_logregL1.named_steps['logisticregression'].coef_[0]
+selected_features_l1 = X.columns[coef != 0].tolist()
+
+print("\nLASSO selected features:", selected_features_l1)
+
+
+#%%
+filter_features = ['kurtosis', 'max', 'zero_crossings', 'spectral_flatness', 'skewness', 'spectral_bandwidth']
+print("Filter selected features:", filter_features) #To visualize the filter selected features in terminal (was selected manually based on mutual inormation scores and pearson correleation)
+rfe_features = selected_features_rfe
+lasso_features = selected_features_l1
+
+X_filter = X[filter_features]
+X_rfe = X[rfe_features]
+X_lasso = X[lasso_features]
+
+def evaluate_features(X_sub, y):
+    pipeline = make_pipeline(StandardScaler(), SVC(kernel='rbf', probability=True, random_state=42))
+    scores = cross_val_score(pipeline, X_sub, y, cv=5)
+    mean_score = float(np.mean(scores))
+    return mean_score
+
+
+Filter_Score = evaluate_features(X_filter, y)
+print("Filter features performance:", Filter_Score)
+
+RFE_Score = evaluate_features(X_rfe, y)
+print("RFE features performance:", RFE_Score)
+
+LASSO_Score = evaluate_features(X_lasso, y)
+print("LASSO features performance:", LASSO_Score)
+
